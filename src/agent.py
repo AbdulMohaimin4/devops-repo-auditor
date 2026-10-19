@@ -7,6 +7,14 @@ from urllib.parse import urlparse
 
 import git
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # dotenv is a convenience; env vars still work without it
+    def load_dotenv(*_a, **_k):
+        return False
+
+from agent_loop import run_audit
+
 CLONE_DEPTH = 50
 
 
@@ -59,6 +67,7 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    load_dotenv()
     args = parse_args(argv)
 
     if not validate(args.repo, args.output):
@@ -77,9 +86,15 @@ def main(argv=None):
             print(f"error: failed to clone {args.repo}: {exc}", file=sys.stderr)
             return 1
 
-        # Walking skeleton: the inspection loop is not wired in yet, so we
-        # report no violations. Milestones 1+ populate this.
-        violations = []
+        # Run the LLM-driven agent loop over the clone. On any failure we exit
+        # nonzero rather than writing an empty report, which would be an
+        # untruthful "healthy repo" result.
+        try:
+            violations = run_audit(tmpdir)
+        except Exception as exc:  # noqa: BLE001 - fatal: report and exit nonzero
+            print(f"error: audit failed: {exc}", file=sys.stderr)
+            return 1
+
         write_report(args.output, args.repo, violations)
         return 0
     finally:
