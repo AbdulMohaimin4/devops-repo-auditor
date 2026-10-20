@@ -1,14 +1,13 @@
 """The agent loop: an explicit observe -> reason -> tool-call -> interpret
 cycle driven by an LLM's native tool-calling.
 
-No agent framework is used. We own the control flow: we hand the model a set
-of inspection tools, dispatch whatever it calls, feed results back, and stop
-when it calls the terminal ``report_findings`` tool (or we hit the iteration
-cap and force a final call).
+No third party agent framework is used, instead there is custom control and 
+the model uses a set of inspection tools, dispatches whatever it calls, feeds 
+results back, and stops when it calls the terminal ``report_findings`` tool 
+(or when the iteration cap is hit and it forces a final call).
 
-Provider-agnostic: we talk to any OpenAI-compatible endpoint. Defaults target
-Google Gemini's OpenAI-compatible API, but base URL / model / key are all env
-configurable, so the grader can point it at any provider.
+The agent is provider-agnostic and works with any OpenAI-compatible endpoint. 
+It uses Google Gemini's OpenAI-compatible API by default, but .env is configurable.
 """
 
 import json
@@ -20,15 +19,13 @@ from openai import OpenAI
 
 from tools import RepoTools
 
-# --- provider config (all overridable via env) ------------------------------
+# --- provider config (overridable via env) ------------------------------
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-# Lite is the default: its free-tier daily quota is far higher than the full
-# flash model (which is ~20 requests/day and 429s mid-audit). Set LLM_MODEL to
-# gemini-flash-latest if you have higher quota and want a stronger model.
+
 DEFAULT_MODEL = "gemini-flash-lite-latest"
 
 MAX_ITERATIONS = 30       # bound cost and guarantee termination
-TEMPERATURE = 0.0         # deterministic-ish; this is analysis, not prose
+TEMPERATURE = 0.0         # deterministic for analysis
 TRACE_RESULT_CHARS = 2000  # trim tool results in the trace log
 
 SYSTEM_PROMPT = """\
