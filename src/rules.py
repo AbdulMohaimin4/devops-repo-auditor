@@ -1,8 +1,8 @@
 """Rule catalog: stable rule_ids per DevOps inspection area, with default
 severities.
 
-Kept as data (not prose) so it serves two jobs:
-  1. rendered into the system prompt as *hints* the model can anchor to, and
+Kept as data so it serves two jobs:
+  1. injected into the system prompt as *hints* the model can anchor to, and
   2. reused by output validation (valid categories / severities / id prefixes).
 
 These are hints, not a checklist. The model chooses what to pursue based on
