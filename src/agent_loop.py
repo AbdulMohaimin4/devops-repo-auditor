@@ -15,10 +15,29 @@ import os
 import sys
 import time
 
+import openai
 from openai import OpenAI
 
 from rules import render_catalog
 from tools import RepoTools
+
+# Transient API failures worth retrying with backoff. A persistent failure is
+# re-raised so the caller exits nonzero -- we never fake an empty report, which
+# would read as a healthy repo.
+RETRYABLE_ERRORS = (
+    openai.APIConnectionError,
+    openai.APITimeoutError,
+    openai.RateLimitError,
+    openai.InternalServerError,
+)
+MAX_RETRIES = 4          # total attempts per model call
+RETRY_BASE_DELAY = 2.0   # seconds; doubles each retry, capped
+RETRY_MAX_DELAY = 30.0
+
+# pytest policy: this agent NEVER executes the target repository's code. The
+# brief forbids running untrusted code without isolation, so there is no
+# run_pytest tool -- testing is assessed statically from CI config and the
+# presence/shape of tests. Documented here and in the README.
 
 # --- provider config (overridable via env) ------------------------------
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -144,6 +163,17 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "read_github_actions",
+            "description": "Parse .github/workflows/*.yml into structured form "
+            "(triggers, top-level and per-job permissions, jobs and their steps' "
+            "uses/run/if). Prefer this over read_file for judging CI gates and "
+            "unsafe workflow permissions/triggers.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "report_findings",
             "description": "Submit the final audit result and end the "
             "investigation. Call exactly once when done.",
@@ -197,7 +227,8 @@ TOOL_SCHEMAS = [
 ]
 
 # tools the agent can call for observation (report_findings is terminal)
-INSPECTION_TOOLS = {"list_files", "read_file", "search_code", "git_log"}
+INSPECTION_TOOLS = {"list_files", "read_file", "search_code", "git_log",
+                    "read_github_actions"}
 
 
 class Tracer:
@@ -242,6 +273,8 @@ def _dispatch(tools, name, args):
         return tools.search_code(args.get("pattern", ""))
     if name == "git_log":
         return tools.git_log()
+    if name == "read_github_actions":
+        return tools.read_github_actions()
     return {"error": f"unknown tool: {name}"}
 
 
@@ -252,6 +285,27 @@ def _parse_args(raw):
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return {}
+
+
+def _log(msg):
+    """Log to stderr; stdout is reserved so it never corrupts the JSON file."""
+    print(msg, file=sys.stderr)
+
+
+def _create_with_retry(client, **kwargs):
+    """Call the chat completion API, retrying transient errors with exponential
+    backoff. Re-raises if every attempt fails."""
+    delay = RETRY_BASE_DELAY
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except RETRYABLE_ERRORS as exc:
+            if attempt == MAX_RETRIES:
+                raise
+            _log(f"LLM call failed ({type(exc).__name__}); retry "
+                 f"{attempt}/{MAX_RETRIES - 1} in {delay:.0f}s")
+            time.sleep(delay)
+            delay = min(delay * 2, RETRY_MAX_DELAY)
 
 
 def run_audit(clone_root, trace_path="trace.jsonl", model=None):
@@ -276,7 +330,8 @@ def run_audit(clone_root, trace_path="trace.jsonl", model=None):
 
     for step in range(1, MAX_ITERATIONS + 1):
         force_final = step == MAX_ITERATIONS
-        response = client.chat.completions.create(
+        response = _create_with_retry(
+            client,
             model=model,
             messages=messages,
             tools=TOOL_SCHEMAS,

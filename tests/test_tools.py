@@ -118,3 +118,30 @@ def test_git_log(tools):
 def test_git_log_non_repo(tmp_path):
     result = RepoTools(tmp_path).git_log()
     assert "error" in result
+
+
+def test_read_github_actions(tmp_path):
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "ci.yml").write_text(
+        "name: CI\n"
+        "on: [push, pull_request]\n"  # bare `on` -> YAML 1.1 boolean True quirk
+        "permissions: write-all\n"
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - run: pytest\n"
+    )
+    result = RepoTools(tmp_path).read_github_actions()
+    assert result["count"] == 1
+    wf0 = result["workflows"][0]
+    assert wf0["triggers"] == ["push", "pull_request"]  # resolved despite `on`->True
+    assert wf0["permissions"] == "write-all"
+    steps = wf0["jobs"]["test"]["steps"]
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert steps[1]["run"] is True
+
+
+def test_read_github_actions_absent(tmp_path):
+    assert RepoTools(tmp_path).read_github_actions()["workflows"] == []

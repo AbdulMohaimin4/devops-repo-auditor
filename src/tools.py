@@ -8,9 +8,10 @@ have the loop crash.
 
 import os
 import re
+import subprocess
 from pathlib import Path
 
-import git
+import yaml
 
 # --- caps -------------------------------------------------------------------
 # We pay tokens for every byte returned to the model, so each tool bounds its
@@ -21,6 +22,7 @@ MAX_READ_BYTES = 50_000   # read_file: bytes before truncation
 MAX_MATCHES = 100         # search_code: matches before truncation
 MAX_SNIPPET = 200         # search_code: chars per matched line
 MAX_COMMITS = 50          # git_log: commits returned
+GIT_LOG_TIMEOUT = 15      # git_log: hard subprocess timeout (seconds)
 
 # Directories we never descend into regardless of the tool.
 SKIP_DIRS = {".git"}
@@ -153,23 +155,88 @@ class RepoTools:
             return {"error": str(exc)}
 
     def git_log(self):
-        """Return recent commits (hash, author, date, subject)."""
-        try:
-            repo = git.Repo(self.root)
-        except Exception as exc:  # noqa: BLE001 (InvalidGitRepositoryError etc.)
-            return {"error": f"not a git repository: {exc}"}
+        """Return recent commits (hash, author, date, subject).
 
+        Runs ``git log`` as a subprocess with a hard timeout -- this is the one
+        tool that spawns a child process, so it must not be able to hang the
+        run. Fields are separated by \\x1f (unit separator) to survive commit
+        subjects that contain arbitrary punctuation.
+        """
         try:
-            commits = []
-            for commit in repo.iter_commits(max_count=MAX_COMMITS):
-                commits.append(
-                    {
-                        "hash": commit.hexsha[:10],
-                        "author": f"{commit.author.name} <{commit.author.email}>",
-                        "date": commit.committed_datetime.isoformat(),
-                        "subject": commit.summary,
-                    }
-                )
-            return {"commits": commits, "count": len(commits)}
-        except Exception as exc:  # noqa: BLE001
+            proc = subprocess.run(
+                ["git", "-C", str(self.root), "log",
+                 f"--max-count={MAX_COMMITS}",
+                 "--pretty=format:%H%x1f%an%x1f%ae%x1f%cI%x1f%s"],
+                capture_output=True,
+                text=True,
+                timeout=GIT_LOG_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            return {"error": f"git log timed out after {GIT_LOG_TIMEOUT}s"}
+        except OSError as exc:
             return {"error": str(exc)}
+
+        if proc.returncode != 0:
+            return {"error": (proc.stderr or "git log failed").strip()}
+
+        commits = []
+        for line in proc.stdout.splitlines():
+            if not line:
+                continue
+            parts = line.split("\x1f")
+            if len(parts) != 5:
+                continue
+            sha, name, email, date, subject = parts
+            commits.append({
+                "hash": sha[:10],
+                "author": f"{name} <{email}>",
+                "date": date,
+                "subject": subject,
+            })
+        return {"commits": commits, "count": len(commits)}
+
+    def read_github_actions(self):
+        """Parse .github/workflows/*.y(a)ml into a compact structure (triggers,
+        permissions, jobs -> steps) so the model can judge CI/security signals
+        without re-reading raw YAML. Per-file errors are kept as data."""
+        wf_dir = self.root / ".github" / "workflows"
+        if not wf_dir.is_dir():
+            return {"workflows": [], "note": "no .github/workflows directory"}
+
+        workflows = []
+        for path in sorted(wf_dir.iterdir()):
+            if path.suffix not in (".yml", ".yaml") or not path.is_file():
+                continue
+            rel = path.relative_to(self.root).as_posix()
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8", errors="replace"))
+            except yaml.YAMLError as exc:
+                workflows.append({"file": rel, "error": f"invalid YAML: {exc}"})
+                continue
+            if not isinstance(data, dict):
+                workflows.append({"file": rel, "error": "not a workflow mapping"})
+                continue
+
+            jobs = {}
+            raw_jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+            for jname, job in raw_jobs.items():
+                if not isinstance(job, dict):
+                    continue
+                steps = [
+                    {"uses": s.get("uses"), "run": bool(s.get("run")), "if": s.get("if")}
+                    for s in (job.get("steps") or []) if isinstance(s, dict)
+                ]
+                jobs[jname] = {
+                    "permissions": job.get("permissions"),
+                    "if": job.get("if"),
+                    "continue-on-error": job.get("continue-on-error"),
+                    "steps": steps,
+                }
+            workflows.append({
+                "file": rel,
+                # YAML 1.1 parses the bare key `on` as boolean True; check both.
+                "triggers": data.get("on", data.get(True)),
+                "permissions": data.get("permissions"),
+                "jobs": jobs,
+            })
+        return {"workflows": workflows, "count": len(workflows)}
