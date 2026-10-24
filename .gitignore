@@ -3,5 +3,6 @@ __pycache__/
 .env
 report.json
 trace.jsonl
+eval/traces/
 Assignment_2_DevOps_Repository_Auditing_Agent_Updated.md
 TASKS.md

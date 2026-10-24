@@ -1,0 +1,25 @@
+{
+  "repository": "https://github.com/geekcomputers/Python",
+  "violations": [
+    {
+      "rule_id": "SEC-001",
+      "category": "security",
+      "severity": "critical",
+      "file": "tweeter.py",
+      "line": 45,
+      "description": "A hardcoded credential/secret placeholder (consumer key secret, access token, and access token secret) is present in source code.",
+      "evidence": "tweeter.py lines 45-47",
+      "recommendation": "Remove hardcoded credential templates and load them from environment variables or secure credential storage."
+    },
+    {
+      "rule_id": "HYG-003",
+      "category": "repository hygiene",
+      "severity": "low",
+      "file": "1 File handle/File handle binary/.env",
+      "line": 1,
+      "description": "Temporary/build/local files (.env, .pyc, .vscode/settings.json) are tracked in version control.",
+      "evidence": "1 File handle/File handle binary/.env and compiled .pyc files tracked in git status",
+      "recommendation": "Add these paths to .gitignore and remove them from the repository using git rm --cached."
+    }
+  ]
+}

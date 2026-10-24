@@ -1,0 +1,159 @@
+{
+  "repo_a": {
+    "tp": 7,
+    "fp": 0,
+    "fn": 4,
+    "precision": 1.0,
+    "recall": 0.636,
+    "missed": [
+      "missing/unsuitable .gitignore",
+      "tracked build artifact",
+      "no test suite present",
+      "unused imports (ruff F401)"
+    ],
+    "spurious": [],
+    "reported": 7,
+    "expected": 11,
+    "violations": [
+      {
+        "rule_id": "HYG-002",
+        "category": "repository hygiene",
+        "severity": "low",
+        "file": null,
+        "line": null,
+        "description": "Repository is missing a .gitignore file, leading to tracked temporary and sensitive files (.env and __pycache__/).",
+        "evidence": ".gitignore does not exist, and .env and __pycache__/app.cpython-311.pyc are tracked in version control.",
+        "recommendation": "Add a .gitignore file ignoring .env, __pycache__/, and other build/local artifacts, and remove them from git tracking."
+      },
+      {
+        "rule_id": "HYG-003",
+        "category": "repository hygiene",
+        "severity": "low",
+        "file": ".env",
+        "line": 1,
+        "description": "Temporary or generated build artifacts (bytecode cache) and local environment/secret files are tracked in version control.",
+        "evidence": "Tracked files include __pycache__/app.cpython-311.pyc and .env.",
+        "recommendation": "Remove generated and environment files from git tracking and add them to .gitignore."
+      },
+      {
+        "rule_id": "DEP-003",
+        "category": "dependency management",
+        "severity": "low",
+        "file": "requirements.txt",
+        "line": 1,
+        "description": "Dependencies in requirements.txt lack version constraints (unpinned).",
+        "evidence": "requirements.txt contains unpinned dependencies: flask and requests.",
+        "recommendation": "Pin dependency versions or use a lockfile to ensure reproducible builds."
+      },
+      {
+        "rule_id": "CI-004",
+        "category": "ci",
+        "severity": "medium",
+        "file": ".github/workflows/ci.yml",
+        "line": 9,
+        "description": "Tests command in CI uses '|| true', masking test failures and making CI an ineffective quality gate.",
+        "evidence": ".github/workflows/ci.yml runs '- run: pytest || true', preventing test failures from failing the CI job.",
+        "recommendation": "Remove '|| true' so that failing tests correctly fail the CI build."
+      },
+      {
+        "rule_id": "CI-003",
+        "category": "ci",
+        "severity": "medium",
+        "file": ".github/workflows/ci.yml",
+        "line": 2,
+        "description": "CI workflow triggers only on push and lacks pull_request triggers.",
+        "evidence": ".github/workflows/ci.yml specifies triggers as 'on: [push]'.",
+        "recommendation": "Add pull_request trigger to run CI checks on pull requests."
+      },
+      {
+        "rule_id": "SEC-001",
+        "category": "security",
+        "severity": "critical",
+        "file": "config.py",
+        "line": 4,
+        "description": "Hardcoded credentials/secrets committed directly in source and configuration files (.env and config.py).",
+        "evidence": ".env contains SECRET_TOKEN and config.py contains hardcoded AWS_ACCESS_KEY_ID and DB_PASSWORD.",
+        "recommendation": "Remove hardcoded secrets from code, use environment variables or a secure vault, and rotate compromised secrets."
+      },
+      {
+        "rule_id": "SEC-002",
+        "category": "security",
+        "severity": "high",
+        "file": ".github/workflows/ci.yml",
+        "line": 3,
+        "description": "GitHub Actions workflow uses excessively broad 'write-all' permissions at the top level.",
+        "evidence": ".github/workflows/ci.yml sets 'permissions: write-all'.",
+        "recommendation": "Apply principle of least privilege by specifying exact required permissions per job or workflow."
+      }
+    ]
+  },
+  "repo_b": {
+    "tp": 4,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "missed": [],
+    "spurious": [],
+    "reported": 4,
+    "expected": 4,
+    "violations": [
+      {
+        "rule_id": "SEC-003",
+        "category": "security",
+        "severity": "high",
+        "file": ".github/workflows/ci.yml",
+        "line": 3,
+        "description": "The GitHub Actions workflow uses the dangerous pull_request_target trigger combined with checking out the pull request's head SHA (ref: ${{ github.event.pull_request.head.sha }}), allowing untrusted code from pull requests to execute with elevated privileges and potential access to repository secrets.",
+        "evidence": "pull_request_target:\n    branches: [main]\n...\n      - uses: actions/checkout@main\n        with:\n          ref: ${{ github.event.pull_request.head.sha }}",
+        "recommendation": "Use the standard pull_request trigger instead of pull_request_target, or do not check out and execute untrusted head code under pull_request_target."
+      },
+      {
+        "rule_id": "CFG-001",
+        "category": "configuration",
+        "severity": "medium",
+        "file": "settings.ini",
+        "line": 3,
+        "description": "settings.ini contains a hardcoded machine-specific absolute path (/Users/alice/dev/service-b/.cache), which breaks portability across different development environments or CI runners.",
+        "evidence": "cache_dir = /Users/alice/dev/service-b/.cache",
+        "recommendation": "Use relative paths, environment variables, or platform-appropriate configuration paths."
+      },
+      {
+        "rule_id": "SEC-004",
+        "category": "security",
+        "severity": "low",
+        "file": ".github/workflows/ci.yml",
+        "line": 9,
+        "description": "Actions/checkout is pinned to a mutable branch reference (@main) instead of a specific commit SHA or immutable tag.",
+        "evidence": "- uses: actions/checkout@main",
+        "recommendation": "Pin actions to an immutable commit SHA (e.g. actions/checkout@11bd71901ebe5b168054d32650f06180eec08a51) or tagged version."
+      },
+      {
+        "rule_id": "TST-002",
+        "category": "testing",
+        "severity": "medium",
+        "file": ".github/workflows/ci.yml",
+        "line": 12,
+        "description": "Tests exist in the repository (tests/test_service.py) but the CI workflow only runs ruff check and never executes pytest or tests.",
+        "evidence": ".github/workflows/ci.yml runs only 'ruff check .' and does not run pytest or test commands.",
+        "recommendation": "Add a test step running pytest to the CI pipeline."
+      }
+    ]
+  },
+  "repo_c": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "missed": [],
+    "spurious": [],
+    "reported": 0,
+    "expected": 0,
+    "violations": []
+  },
+  "_overall": {
+    "precision": 1.0,
+    "recall": 0.733
+  }
+}

@@ -6,9 +6,12 @@ Every tool is read-only and returns plain data (dict/list) on success or
 have the loop crash.
 """
 
+import importlib.util
+import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -22,10 +25,27 @@ MAX_READ_BYTES = 50_000   # read_file: bytes before truncation
 MAX_MATCHES = 100         # search_code: matches before truncation
 MAX_SNIPPET = 200         # search_code: chars per matched line
 MAX_COMMITS = 50          # git_log: commits returned
-GIT_LOG_TIMEOUT = 15      # git_log: hard subprocess timeout (seconds)
+GIT_LOG_TIMEOUT = 15      # git_log / git_status: hard subprocess timeout (seconds)
+MAX_RUFF_FINDINGS = 100   # run_ruff: findings sampled before truncation
+RUFF_TIMEOUT = 60         # run_ruff: hard subprocess timeout (seconds)
 
 # Directories we never descend into regardless of the tool.
 SKIP_DIRS = {".git"}
+
+# Tracked paths that usually belong in .gitignore: build artifacts, caches,
+# editor/IDE dirs, committed virtualenvs/secrets. git_status flags these.
+_JUNK_PATTERNS = [
+    re.compile(p) for p in (
+        r"(^|/)__pycache__/", r"\.pyc$", r"\.pyo$",
+        r"(^|/)\.env$", r"(^|/)\.env\.local$",
+        r"(^|/)\.venv/", r"(^|/)venv/", r"(^|/)node_modules/",
+        r"(^|/)\.DS_Store$", r"(^|/)Thumbs\.db$",
+        r"(^|/)\.idea/", r"(^|/)\.vscode/",
+        r"(^|/)dist/", r"(^|/)build/", r"\.egg-info(/|$)",
+        r"(^|/)\.coverage$", r"(^|/)\.mypy_cache/", r"(^|/)\.pytest_cache/",
+        r"(^|/)\.ruff_cache/", r"\.log$",
+    )
+]
 
 
 class RepoTools:
@@ -240,3 +260,87 @@ class RepoTools:
                 "jobs": jobs,
             })
         return {"workflows": workflows, "count": len(workflows)}
+
+    def git_status(self):
+        """Report repository-hygiene signals from version control: whether a
+        .gitignore exists, and which *tracked* files match common generated/
+        local junk patterns (caches, build artifacts, editor/IDE dirs, a
+        committed .env). Surfaces files that are committed but usually ought to
+        be ignored -- evidence for hygiene findings. Read-only: runs
+        ``git ls-files``, never mutating the repo."""
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(self.root), "ls-files"],
+                capture_output=True,
+                text=True,
+                timeout=GIT_LOG_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            return {"error": f"git ls-files timed out after {GIT_LOG_TIMEOUT}s"}
+        except OSError as exc:
+            return {"error": str(exc)}
+        if proc.returncode != 0:
+            return {"error": (proc.stderr or "git ls-files failed").strip()}
+
+        tracked = [f for f in proc.stdout.splitlines() if f]
+        junk = [f for f in tracked if any(p.search(f) for p in _JUNK_PATTERNS)]
+        return {
+            "has_gitignore": (self.root / ".gitignore").is_file(),
+            "tracked_file_count": len(tracked),
+            "tracked_junk": junk[:MAX_MATCHES],
+            "tracked_junk_count": len(junk),
+        }
+
+    def run_ruff(self):
+        """Statically lint the repo's Python with ruff and return a bounded
+        summary (totals, counts per rule code, a sample of findings). Scoped to
+        high-signal rules (E9 syntax errors, F pyflakes: undefined names, unused
+        imports) and run with --isolated so a repo's own ruff config cannot
+        suppress or alter the result.
+
+        Safe on an untrusted repo: ruff only *parses* Python, it never imports
+        or executes it -- unlike the repo's own test suite, which is why there
+        is deliberately no run_pytest tool. Returns an error as data if ruff is
+        not installed."""
+        # Invoke via the current interpreter so it works whether or not the
+        # venv's bin is on PATH; find_spec gives a clean "not installed" signal.
+        if importlib.util.find_spec("ruff") is None:
+            return {"error": "ruff is not installed"}
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "ruff", "check", "--isolated",
+                 "--select", "E9,F", "--output-format", "json", "--exit-zero", "."],
+                cwd=str(self.root),
+                capture_output=True,
+                text=True,
+                timeout=RUFF_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            return {"error": f"ruff timed out after {RUFF_TIMEOUT}s"}
+        except OSError as exc:
+            return {"error": str(exc)}
+
+        try:
+            findings = json.loads(proc.stdout or "[]")
+        except json.JSONDecodeError:
+            return {"error": (proc.stderr or "ruff produced no parseable output").strip()[:500]}
+
+        by_code = {}
+        for f in findings:
+            code = f.get("code") or "unknown"
+            by_code[code] = by_code.get(code, 0) + 1
+
+        sample = []
+        for f in findings[:MAX_RUFF_FINDINGS]:
+            fn = f.get("filename")
+            rel = os.path.relpath(fn, self.root).replace(os.sep, "/") if fn else None
+            sample.append({
+                "code": f.get("code"),
+                "file": rel,
+                "line": (f.get("location") or {}).get("row"),
+                "message": f.get("message"),
+            })
+        result = {"total": len(findings), "by_code": by_code, "sample": sample}
+        if len(findings) > MAX_RUFF_FINDINGS:
+            result["truncated"] = True
+        return result

@@ -1,0 +1,26 @@
+{
+  "_doc": "Expected findings per fixture = the defects deliberately planted in build_fixtures.py. Each item is matched against a reported violation when the reported category is in 'category' (string or list of acceptable labels) and, if 'file' is given, that token appears in the reported file, description, or evidence. Each expected item matches at most one report; extra reports are false positives. repo_c is healthy: any report is a false positive.",
+
+  "repo_a": [
+    {"category": "security", "file": "config.py", "note": "hardcoded AWS key / DB password in source"},
+    {"category": ["security", "repository hygiene", "configuration"], "file": ".env", "note": "committed secret file"},
+    {"category": "security", "file": "write-all", "note": "workflow permissions: write-all"},
+    {"category": "ci", "file": "pytest", "note": "ineffective gate: pytest || true"},
+    {"category": "ci", "file": "trigger", "note": "CI triggers on push only, no pull_request"},
+    {"category": "repository hygiene", "file": null, "note": "missing README"},
+    {"category": "repository hygiene", "file": ".gitignore", "note": "missing/unsuitable .gitignore"},
+    {"category": ["repository hygiene", "configuration"], "file": "__pycache__", "note": "tracked build artifact"},
+    {"category": "testing", "file": null, "note": "no test suite present"},
+    {"category": "dependency management", "file": "requirements", "note": "unpinned / weak version constraints"},
+    {"category": "code quality", "file": "app.py", "note": "unused imports (ruff F401)"}
+  ],
+
+  "repo_b": [
+    {"category": "security", "file": "pull_request_target", "note": "dangerous pull_request_target with PR-head checkout"},
+    {"category": "security", "file": "@main", "note": "unpinned third-party action (mutable ref)"},
+    {"category": ["testing", "ci"], "file": "ci.yml", "note": "tests exist but CI never runs them"},
+    {"category": "configuration", "file": "settings.ini", "note": "machine-specific absolute path"}
+  ],
+
+  "repo_c": []
+}

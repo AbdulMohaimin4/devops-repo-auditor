@@ -132,3 +132,11 @@ def test_loop_forces_final_call_at_cap(monkeypatch, clone_root):
 def test_unknown_tool_returns_error_observation(clone_root):
     tools = agent_loop.RepoTools(str(clone_root))
     assert "error" in agent_loop._dispatch(tools, "nope", {})
+
+
+def test_dispatch_routes_all_inspection_tools(clone_root):
+    # every advertised inspection tool must be dispatchable (no typos/omissions)
+    tools = agent_loop.RepoTools(str(clone_root))
+    for name in agent_loop.INSPECTION_TOOLS:
+        result = agent_loop._dispatch(tools, name, {})
+        assert isinstance(result, dict), name

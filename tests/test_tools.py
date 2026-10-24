@@ -1,6 +1,7 @@
 """Unit tests for the inspection tools, run against a tiny fixture repo built
 in a temp dir without the need of an API key."""
 
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import tools as tools_module  # noqa: E402
 from tools import (  # noqa: E402
     MAX_MATCHES,
     MAX_READ_LINES,
@@ -145,3 +147,56 @@ def test_read_github_actions(tmp_path):
 
 def test_read_github_actions_absent(tmp_path):
     assert RepoTools(tmp_path).read_github_actions()["workflows"] == []
+
+
+def test_git_status_flags_tracked_junk(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    repo = git.Repo.init(root)
+    repo.config_writer().set_value("user", "name", "Test").release()
+    repo.config_writer().set_value("user", "email", "t@example.com").release()
+    (root / "app.py").write_text("x = 1\n")
+    (root / ".env").write_text("SECRET=1\n")  # committed secret file -> junk
+    cache = root / "__pycache__"
+    cache.mkdir()
+    (cache / "app.cpython-312.pyc").write_bytes(b"\x00")  # tracked cache -> junk
+    repo.index.add(["app.py", ".env", "__pycache__/app.cpython-312.pyc"])
+    repo.index.commit("initial")
+
+    result = RepoTools(root).git_status()
+    assert "error" not in result
+    assert result["has_gitignore"] is False
+    assert ".env" in result["tracked_junk"]
+    assert "__pycache__/app.cpython-312.pyc" in result["tracked_junk"]
+    assert "app.py" not in result["tracked_junk"]
+    assert result["tracked_junk_count"] == 2
+
+
+def test_git_status_non_repo(tmp_path):
+    assert "error" in RepoTools(tmp_path).git_status()
+
+
+_HAS_RUFF = importlib.util.find_spec("ruff") is not None
+
+
+@pytest.mark.skipif(not _HAS_RUFF, reason="ruff not installed")
+def test_run_ruff_reports_findings(tmp_path):
+    (tmp_path / "bad.py").write_text("import os\n\n\ndef f():\n    return undefined_name\n")
+    result = RepoTools(tmp_path).run_ruff()
+    assert "error" not in result
+    assert result["total"] >= 2  # F401 unused import + F821 undefined name
+    assert "F401" in result["by_code"]
+    assert any(h["file"] == "bad.py" for h in result["sample"])
+
+
+@pytest.mark.skipif(not _HAS_RUFF, reason="ruff not installed")
+def test_run_ruff_clean_repo(tmp_path):
+    (tmp_path / "ok.py").write_text("def f(a, b):\n    return a + b\n")
+    result = RepoTools(tmp_path).run_ruff()
+    assert "error" not in result
+    assert result["total"] == 0
+
+
+def test_run_ruff_not_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_module.importlib.util, "find_spec", lambda _n: None)
+    assert RepoTools(tmp_path).run_ruff() == {"error": "ruff is not installed"}

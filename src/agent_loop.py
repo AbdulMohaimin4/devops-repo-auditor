@@ -56,7 +56,9 @@ HOW YOU WORK
 You investigate by calling the provided tools. Behave like a human investigator:
 first map the repository (list_files), then read the files that look relevant,
 use search_code to confirm suspicions across the tree, and inspect git_log for
-history signals. Let what you observe drive what you look at next. The areas and
+history signals. Use read_github_actions for CI/workflow judgments, git_status
+to confirm tracked junk files, and run_ruff for concrete code-quality evidence.
+Let what you observe drive what you look at next. The areas and
 rules below are HINTS to steer your attention -- they are NOT a checklist to run
 top to bottom, and not every area applies to every repo.
 
@@ -174,6 +176,28 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "git_status",
+            "description": "Report version-control hygiene: whether a .gitignore "
+            "exists, and which tracked files match common junk patterns (caches, "
+            "build artifacts, .vscode/.idea, a committed .env). Use to confirm "
+            "tracked temp/generated/local files before reporting a hygiene issue.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_ruff",
+            "description": "Statically lint the repo's Python with ruff (syntax "
+            "errors and pyflakes: undefined names, unused imports). Parses code, "
+            "never executes it. Use for concrete code-quality/maintainability "
+            "evidence; returns an error if ruff is unavailable.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "report_findings",
             "description": "Submit the final audit result and end the "
             "investigation. Call exactly once when done.",
@@ -228,7 +252,7 @@ TOOL_SCHEMAS = [
 
 # tools the agent can call for observation (report_findings is terminal)
 INSPECTION_TOOLS = {"list_files", "read_file", "search_code", "git_log",
-                    "read_github_actions"}
+                    "read_github_actions", "git_status", "run_ruff"}
 
 
 class Tracer:
@@ -275,6 +299,10 @@ def _dispatch(tools, name, args):
         return tools.git_log()
     if name == "read_github_actions":
         return tools.read_github_actions()
+    if name == "git_status":
+        return tools.git_status()
+    if name == "run_ruff":
+        return tools.run_ruff()
     return {"error": f"unknown tool: {name}"}
 
 

@@ -73,6 +73,15 @@ def test_category_derived_from_rule_id_when_missing():
     assert clean[0]["category"] == "security"
 
 
+def test_category_normalized_to_catalog_label():
+    # model free-texts "hygiene"; the contract label for HYG-* is the catalog's
+    v = _valid()
+    v["rule_id"] = "HYG-001"
+    v["category"] = "hygiene"
+    clean, _ = validate_violations([v])
+    assert clean[0]["category"] == "repository hygiene"
+
+
 def test_rule_id_derived_from_category_when_missing():
     v = _valid()
     del v["rule_id"]
@@ -129,3 +138,12 @@ def test_evidence_is_redacted_in_pipeline():
     v["evidence"] = "AWS key AKIAIOSFODNN7EXAMPLE committed"
     clean, _ = validate_violations([v])
     assert "AKIAIOSFODNN7EXAMPLE" not in clean[0]["evidence"]
+
+
+def test_recommendation_is_redacted_in_pipeline():
+    # a model can echo a secret in its recommendation too -- it must not leak
+    v = _valid()
+    v["recommendation"] = "rotate the exposed key AKIAIOSFODNN7EXAMPLE"
+    clean, _ = validate_violations([v])
+    assert "AKIAIOSFODNN7EXAMPLE" not in clean[0]["recommendation"]
+    assert validation.REDACTED in clean[0]["recommendation"]

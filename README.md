@@ -35,8 +35,11 @@ cp .env.example .env
 ## Run
 
 ```bash
-python src/agent.py --repo <github_repository_url> --output report.json
+python agent.py --repo <github_repository_url> --output report.json
 ```
+
+(`agent.py` at the repo root is a thin entry point; the implementation lives in
+`src/`. `python src/agent.py ...` works identically.)
 
 Runs unattended. On success it writes valid JSON (an empty `violations` array if
 the repo is healthy) and exits 0. On a fatal error (bad URL, clone/auth failure,
@@ -74,6 +77,7 @@ tools.py        Read-only inspection tools (errors returned as data, never raise
 rules.py        Rule catalog (stable rule_ids + default severities per area),
                 injected into the prompt as hints and reused by validation.
 validation.py   Enforces the 8-field contract, severities, nulls, secret redaction.
+eval/           Self-evaluation: synthetic fixtures + precision/recall harness.
 ```
 
 ### Inspection tools
@@ -85,6 +89,8 @@ validation.py   Enforces the 8-field contract, severities, nulls, secret redacti
 | `search_code(pattern)` | Regex search for suspicious patterns |
 | `git_log()` | Recent commit history |
 | `read_github_actions()` | Parse `.github/workflows/*.yml` into structure (triggers, permissions, jobs/steps) |
+| `git_status()` | Hygiene signals: `.gitignore` presence and tracked files matching common junk patterns |
+| `run_ruff()` | Static lint of the repo's Python (syntax errors, undefined names, unused imports) |
 
 All tool output is interpreted by the model; the tools themselves make no
 findings.
@@ -94,7 +100,9 @@ findings.
 - The target repo is **never modified** and its code is **never executed**.
   There is deliberately no `run_pytest` tool — running untrusted code needs
   isolation the brief forbids, so testing is assessed statically from CI config
-  and the shape of the test suite.
+  and the shape of the test suite. `run_ruff()` is safe because ruff only
+  *parses* Python (it never imports or runs it) and uses `--isolated` so the
+  target's own ruff config cannot alter the result.
 - Tool paths are confined to the clone root (`../../etc/passwd` is rejected).
 - Subprocesses (clone, `git log`) run with hard timeouts.
 - Secrets are redacted from evidence; the location is the evidence, not the value.
@@ -107,3 +115,25 @@ PYTHONPATH=src python -m pytest -q
 
 Covers each tool against a fixture repo, the agent loop with a mocked model
 (no API key needed), output validation/redaction, and reliability paths.
+
+## Evaluation (precision / recall)
+
+The hidden-repo grading (precision and recall on unseen repos) can't be seen in
+advance, so `eval/` simulates its three categories with synthetic fixtures:
+`repo_a` (obvious defects), `repo_b` (subtler CI/security/config defects), and
+`repo_c` (healthy — the false-positive trap). Each fixture is defined as data in
+`eval/build_fixtures.py` and built into a throwaway git repo at run time; the
+expected defects live in `eval/answer_key.json`.
+
+```bash
+python eval/run_eval.py            # audit all fixtures, print precision/recall
+python eval/run_eval.py repo_c     # one fixture
+```
+
+It runs the real agent on each fixture, scores reports against the key (a report
+is a true positive when its category matches and the expected file/evidence
+token appears), and writes per-fixture results — including every reported
+violation — to `eval/results.json`. The scoring logic is pure and unit-tested in
+`tests/test_eval.py` without any network. Use it to tune: low recall → read the
+trace and strengthen a prompt hint or add a tool; false positives on `repo_c` →
+tighten the evidence rules.

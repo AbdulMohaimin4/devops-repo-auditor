@@ -116,11 +116,16 @@ def _validate_one(item):
             return None
         rule_id = f"{prefix}-000"
 
-    category = item.get("category")
-    if not isinstance(category, str) or not category.strip():
-        category = _PREFIX_TO_CATEGORY.get(rule_id.split("-", 1)[0], "uncategorized")
+    # Category is the catalog's controlled label for the rule's prefix, so the
+    # field is always one of the known 9 (models otherwise vary it freely:
+    # "hygiene" vs "repository hygiene"). Only an unknown prefix falls back to
+    # the model's stated category.
+    prefix = rule_id.split("-", 1)[0]
+    if prefix in _PREFIX_TO_CATEGORY:
+        category = _PREFIX_TO_CATEGORY[prefix]
     else:
-        category = category.strip()
+        stated = item.get("category")
+        category = stated.strip() if isinstance(stated, str) and stated.strip() else "uncategorized"
 
     severity = item.get("severity")
     severity = severity.strip().lower() if isinstance(severity, str) else None
@@ -129,7 +134,7 @@ def _validate_one(item):
 
     description = redact(_as_str(item.get("description")))
     evidence = redact(_as_str(item.get("evidence")))
-    recommendation = _as_str(item.get("recommendation"))
+    recommendation = redact(_as_str(item.get("recommendation")))
 
     # a finding with no description and no evidence is not defensible
     if not description and not evidence:

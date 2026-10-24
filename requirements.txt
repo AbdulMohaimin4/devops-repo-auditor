@@ -2,4 +2,5 @@ GitPython>=3.1
 openai>=1.40
 python-dotenv>=1.0
 PyYAML>=6.0
+ruff>=0.6
 pytest>=8.0
