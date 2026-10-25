@@ -3,11 +3,11 @@
 An AI agent that autonomously inspects a public GitHub repository, identifies
 DevOps best-practice violations, and writes an evidence-based JSON report.
 
-It is a genuine LLM **agent/tool loop** — not a fixed checklist. The model
-observes the repo, reasons, picks a tool, interprets the result, and decides
-what to look at next, concluding by calling a terminal `report_findings` tool.
-No agent framework (LangChain/LangGraph/n8n) is used; the loop, tool dispatch,
-and control flow are plain Python.
+The application is a **agent/tool loop**, and does not simply rely on a checklist
+of predetermined violation. The model observes the repo, reasons, picks a tool, 
+interprets the result, and decides what to look at next, concluding by calling a 
+terminal `report_findings` tool. No agent framework (LangChain/LangGraph/n8n) is 
+used; the loop, tool dispatch, and control flow are all written in plain Python.
 
 ## Install
 
@@ -44,8 +44,8 @@ python agent.py --repo <github_repository_url> --output report.json
 Runs unattended. On success it writes valid JSON (an empty `violations` array if
 the repo is healthy) and exits 0. On a fatal error (bad URL, clone/auth failure,
 or a persistent LLM API error) it prints a one-line message to stderr and exits
-nonzero — it never writes a faked empty report. Logs go to stderr; only the
-report goes to the output file. See `sample_report.json` for real output.
+nonzero. Logs go to stderr, and only the report goes to the output file. 
+See `sample_report.json` for real output.
 
 ## Output contract
 
@@ -85,7 +85,7 @@ eval/           Self-evaluation: synthetic fixtures + precision/recall harness.
 | Tool | Purpose |
 |---|---|
 | `list_files()` | Map the repo (root-relative paths, skips `.git/`) |
-| `read_file(path)` | Read a file's text (capped; path-escape guarded) |
+| `read_file(path)` | Read a file's text (capped and path-escape guarded) |
 | `search_code(pattern)` | Regex search for suspicious patterns |
 | `git_log()` | Recent commit history |
 | `read_github_actions()` | Parse `.github/workflows/*.yml` into structure (triggers, permissions, jobs/steps) |
@@ -98,14 +98,14 @@ findings.
 ## Safety
 
 - The target repo is **never modified** and its code is **never executed**.
-  There is deliberately no `run_pytest` tool — running untrusted code needs
-  isolation the brief forbids, so testing is assessed statically from CI config
+  There is deliberately no `run_pytest` tool as running untrusted code needs
+  isolation, so testing is assessed statically from CI config
   and the shape of the test suite. `run_ruff()` is safe because ruff only
   *parses* Python (it never imports or runs it) and uses `--isolated` so the
   target's own ruff config cannot alter the result.
 - Tool paths are confined to the clone root (`../../etc/passwd` is rejected).
 - Subprocesses (clone, `git log`) run with hard timeouts.
-- Secrets are redacted from evidence; the location is the evidence, not the value.
+- Secrets are redacted from evidence.
 
 ## Tests
 
@@ -118,10 +118,9 @@ Covers each tool against a fixture repo, the agent loop with a mocked model
 
 ## Evaluation (precision / recall)
 
-The hidden-repo grading (precision and recall on unseen repos) can't be seen in
-advance, so `eval/` simulates its three categories with synthetic fixtures:
+`eval/` simulates its three categories with synthetic fixtures:
 `repo_a` (obvious defects), `repo_b` (subtler CI/security/config defects), and
-`repo_c` (healthy — the false-positive trap). Each fixture is defined as data in
+`repo_c` (healthy, the false-positive trap). Each fixture is defined as data in
 `eval/build_fixtures.py` and built into a throwaway git repo at run time; the
 expected defects live in `eval/answer_key.json`.
 
@@ -132,8 +131,8 @@ python eval/run_eval.py repo_c     # one fixture
 
 It runs the real agent on each fixture, scores reports against the key (a report
 is a true positive when its category matches and the expected file/evidence
-token appears), and writes per-fixture results — including every reported
-violation — to `eval/results.json`. The scoring logic is pure and unit-tested in
-`tests/test_eval.py` without any network. Use it to tune: low recall → read the
-trace and strengthen a prompt hint or add a tool; false positives on `repo_c` →
+token appears), and writes per-fixture results, including every reported
+violation, to `eval/results.json`. The scoring logic is pure and unit-tested in
+`tests/test_eval.py` without any network. Use it to tune: low recall -> read the
+trace and strengthen a prompt hint or add a tool; false positives on `repo_c` ->
 tighten the evidence rules.
